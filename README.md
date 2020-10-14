@@ -1,4 +1,4 @@
-# graph_algo
+# Triangle counting for large-scale directed graphs
 
 ## algorithm configurations
 
