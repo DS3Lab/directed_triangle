@@ -26,7 +26,7 @@ hdfs_host='hdfs_host'
   algo:fast_v2 sep:tab header:false
 
 
-## example for directe graph
+## example for directed graph
 
 hdfs_host='hdfs_host'
 
