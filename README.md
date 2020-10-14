@@ -3,6 +3,7 @@
 ## algorithm configurations
 
 algo: node_iter, node_iter_plus, edge_iter, edge_iter_plus, fast, fast_v2
+
 sep: tab, space, comma
 
 ## example for undirected graph
