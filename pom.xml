@@ -18,18 +18,6 @@
 
     <repositories>
         <repository>
-            <id>rdm-releases-repo</id>
-            <url>http://maven.oa.com/nexus/content/repositories/releases</url>
-        </repository>
-        <repository>
-            <id>tdw-release-repo</id>
-            <url>http://maven.data.oa.com/nexus/content/repositories/releases</url>
-        </repository>
-        <repository>
-            <id>central</id>
-            <url>http://maven.oa.com/nexus/content/groups/public</url>
-        </repository>
-        <repository>
             <id>sonatype</id>
             <url>http://repository.sonatype.org/content/groups/public/</url>
         </repository>
@@ -52,18 +40,6 @@
             <version>${spark.version}</version>
         </dependency>
         <dependency>
-            <groupId>com.tencent.tdw</groupId>
-            <artifactId>spark-core_2.11</artifactId>
-            <version>3.11.0</version>
-            <type>test-jar</type>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.tencent.tdw</groupId>
-            <artifactId>spark-toolkit_${scala.binary.version}</artifactId>
-            <version>3.11.0</version>
-        </dependency>
-        <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-client</artifactId>
             <version>${hadoop.version}</version>
@@ -83,21 +59,6 @@
             <artifactId>log4j</artifactId>
             <version>1.2.9</version>
         </dependency>
-        <!--dependency>
-            <groupId>org.apache.spark</groupId>
-            <artifactId>spark-streaming_${scala.binary.version}</artifactId>
-            <version>${spark.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.spark</groupId>
-            <artifactId>spark-streaming-kafka-0-8_${scala.binary.version}</artifactId>
-            <version>${spark.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.spark</groupId>
-            <artifactId>spark-hive_${scala.binary.version}</artifactId>
-            <version>${spark.version}</version>
-        </dependency-->
     </dependencies>
 
     <build>

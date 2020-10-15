@@ -60,7 +60,7 @@ class EdgeIterPlusDirected(override val uid: String) extends Transformer
 //      println(s"src = $src, degree = $degree") }
     val maxDegree = degrees.map(_._2).max()
     println(s"max degree = $maxDegree")
-    val bcDegrees = sc.broadcast(degrees.collectAsMap())
+    val bcDegrees = sc.broadcast(degrees.collect().toMap)
     val degreeEnd = System.currentTimeMillis()
     println(s"generate degrees cost ${degreeEnd - degreeStart} ms")
 

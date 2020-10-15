@@ -1,15 +1,14 @@
 package ch.ethz.ml.graph.runner
 
 import ch.ethz.ml.graph.data.{Delimiter, GraphIO}
-import ch.ethz.ml.graph.trianglecount.{EdgeIterDirected, EdgeIterPlusDirected, EdgeIterUndirected, FastDirected, FastDirectedV2, FastUndirected, NodeIterDirected, NodeIterPlusDirected, NodeIterUndirected}
+import ch.ethz.ml.graph.trianglecount.{EdgeIterDirected, EdgeIterPlusDirected, EdgeIterUndirected, FastDirected, FastDirectedV2, FastDirectedV3, FastUndirected, NodeIterDirected, NodeIterPlusDirected, NodeIterUndirected}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.storage.StorageLevel
 
 object LocalDirectedRunner {
 
   def main(args: Array[String]): Unit = {
-
-    val algo = "edge_iter_plus"
+    val algo = "fast_v3"
     val mode = "local"
     //val input = "data/wiki-Vote/Wiki-Vote.txt"
     val input = "data/test/directed.txt"
@@ -36,6 +35,7 @@ object LocalDirectedRunner {
     val counter = algo match {
       case "fast" => new FastDirected()
       case "fast_v2" => new FastDirectedV2()
+      case "fast_v3" => new FastDirectedV3()
       case "node_iter" => new NodeIterDirected()
       case "node_iter_plus" => new NodeIterPlusDirected()
       case "edge_iter" => new EdgeIterDirected()
