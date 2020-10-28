@@ -14,6 +14,7 @@ import org.apache.spark.sql.types.{DoubleType, StructField, StructType}
 import org.apache.spark.storage.StorageLevel
 import org.slf4j.LoggerFactory
 
+// no reduction with degree
 class FastUndirected(override val uid: String) extends Transformer
   with HasInput with HasSrcNodeIdCol with HasDstNodeIdCol with HasIsDirected
   with HasPartitionNum with HasStorageLevel {
@@ -26,19 +27,19 @@ class FastUndirected(override val uid: String) extends Transformer
   setDefault(dstNodeIdCol, "dst")
 
   override def transform(dataset: Dataset[_]): DataFrame = {
-
     val sc = dataset.sparkSession.sparkContext
     assert(sc.getCheckpointDir.nonEmpty, "set checkpoint dir first")
-    println(s"partition number: ${$(partitionNum)}")
+    val partNum = $(partitionNum)
+    println(s"partition number: $partNum")
 
-    println(">>> generate neighbors from the dataset ===")
+    println(">>> generate neighbors from the dataset")
     val neighborStart = System.currentTimeMillis()
     // only store smaller vertex id
     val neighbors = dataset.select($(srcNodeIdCol), $(dstNodeIdCol)).rdd.flatMap { row =>
-      Iterator((math.max(row.getLong(0), row.getLong(1)), math.min(row.getLong(1), row.getLong(0))))
-    }.groupByKey($(partitionNum))
+      Iterator((math.min(row.getLong(0), row.getLong(1)), math.max(row.getLong(1), row.getLong(0))))
+    }.groupByKey(partNum)
       .map { case (v, neighbor) =>
-        (v, neighbor.toArray.sortWith(_ < _))
+        (v, neighbor.filter(_ != v).toArray.distinct.sortWith(_ < _))
       }.persist($(storageLevel))
     println(s"count of neighbor tables = ${neighbors.count()}, number of partitions = ${neighbors.getNumPartitions}")
     val neighborsSize = neighbors.mapPartitions(iter => Iterator(iter.size), preservesPartitioning = true).collect()
@@ -48,14 +49,16 @@ class FastUndirected(override val uid: String) extends Transformer
 
     println(">>> load edges from the dataset")
     val edgeStart = System.currentTimeMillis()
-    val partNum = $(partitionNum)
-    val edge = dataset.select($(srcNodeIdCol), $(dstNodeIdCol)).rdd.map { row =>
-      val pid = EdgePartition2D.getPartition(row.getLong(0), row.getLong(1), partNum)
-      (pid, (row.getLong(0), row.getLong(1)))
+    val edge = neighbors.flatMap { case (v, nb) =>
+      nb.flatMap { nid =>
+        val pid = EdgePartition2D.getPartition(v, nid, partNum)
+        Iterator.single((pid, (v, nid)))
+      }
     }.partitionBy(new HashPartitioner(partNum))
       .map { case (_, (src, dst)) =>
         Edge(src, dst, null.asInstanceOf[Byte])
       }.persist($(storageLevel))
+    edge.foreachPartition(_ => Unit)
     println(s"count of edge = ${edge.count()}, number of partitions = ${edge.getNumPartitions}")
     val edgeSize = edge.mapPartitions(iter => Iterator(iter.size), preservesPartitioning = true).collect()
     println(s"partition size of edge: max=${edgeSize.max}, min=${edgeSize.min}")

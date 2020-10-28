@@ -1,10 +1,9 @@
 package ch.ethz.ml.graph.trianglecount
 
-import ch.ethz.ml.graph.data.VertexId
 import ch.ethz.ml.graph.params._
 import org.apache.spark.HashPartitioner
 import org.apache.spark.graphx.PartitionStrategy.EdgePartition2D
-import org.apache.spark.graphx.{Edge, Graph}
+import org.apache.spark.graphx.{Edge, Graph, VertexId}
 import org.apache.spark.ml.Transformer
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.util.Identifiable
@@ -17,8 +16,8 @@ import org.slf4j.LoggerFactory
 import scala.collection.Map
 import scala.collection.mutable.ArrayBuffer
 
-// reduction with degree
-class FastUndirectedV2(override val uid: String) extends Transformer
+// reduction with index,
+class FastUndirectedV4(override val uid: String) extends Transformer
   with HasInput with HasSrcNodeIdCol with HasDstNodeIdCol with HasIsDirected
   with HasPartitionNum with HasStorageLevel {
 
@@ -30,7 +29,6 @@ class FastUndirectedV2(override val uid: String) extends Transformer
   setDefault(dstNodeIdCol, "dst")
 
   override def transform(dataset: Dataset[_]): DataFrame = {
-
     val sc = dataset.sparkSession.sparkContext
     assert(sc.getCheckpointDir.nonEmpty, "set checkpoint dir first")
     println(s"partition number: ${$(partitionNum)}")
@@ -39,54 +37,76 @@ class FastUndirectedV2(override val uid: String) extends Transformer
     val neighborStart = System.currentTimeMillis()
     val neighbors = dataset.select($(srcNodeIdCol), $(dstNodeIdCol)).rdd.flatMap { row =>
       Iterator((row.getLong(0), row.getLong(1)), (row.getLong(1), row.getLong(0)))
-      //Iterator((math.max(row.getLong(0), row.getLong(1)), math.min(row.getLong(1), row.getLong(0))))
     }.groupByKey($(partitionNum))
-      .map { case (v, neighbor) =>
-        (v, neighbor.filter(_ != v).toArray.distinct.sortWith(_ < _))
-      }.persist($(storageLevel))
-    println(s"count of neighbor tables = ${neighbors.count()}, number of partitions = ${neighbors.getNumPartitions}")
+      .map { case (v, neighbor) => (v, neighbor.filter(_ != v).toArray.distinct.sortWith(_ < _)) }
+      .persist($(storageLevel))
+    val numVertices = neighbors.count()
+    println(s"count of neighbor tables = $numVertices, number of partitions = ${neighbors.getNumPartitions}")
     val neighborEnd = System.currentTimeMillis()
     println(s"generate neighbors cost ${neighborEnd - neighborStart} ms")
+    println(s"samples of neighbor RDD:")
+    neighbors.take(num = 5).foreach { case (src, neighbors) =>
+      println(s"src = $src, neighbors = ${neighbors.mkString(",")}") }
     val neighborsSize = neighbors.mapPartitions(iter => Iterator(iter.size), preservesPartitioning = true).collect()
     println(s"partition size of neighbor tables: max=${neighborsSize.max}, min=${neighborsSize.min}," +
       s"cost ${System.currentTimeMillis() - neighborEnd} ms")
 
-    println(">>> generate vertex degrees")
+    println(">>> generate max vertex")
+    val maxVertexStart = System.currentTimeMillis()
+    val maxVertex = neighbors.mapPartitions { iter =>
+      Iterator.single(iter.map(_._1).max)
+    }.max()
+    val maxVertexEnd = System.currentTimeMillis()
+    println(s"max vertex = $maxVertex, generate max vertex cost ${maxVertexEnd - maxVertexStart} ms")
+
+    println(">>> generate vertex degrees after reduction")
     val degreeStart = System.currentTimeMillis()
-    val degrees = neighbors.map { case (v, neighbors) =>
-      (v, neighbors.length)
+    val filterDegree = sc.broadcast(math.sqrt(numVertices))
+    val largeDegrees = neighbors.flatMap { case (v, neighbors) =>
+      val numLarge = neighbors.count(_ > v)
+      if (numLarge > filterDegree.value)
+        Iterator.single(v, numLarge)
+      else
+        Iterator.empty
     }
-    degrees.foreachPartition(_ => Unit)
+    largeDegrees.foreachPartition(_ => Unit)
     val degreeEnd = System.currentTimeMillis()
-    println(s"generate degrees cost ${degreeEnd - degreeStart} ms")
+    println(s"generate degrees larger than ${filterDegree.value} cost ${degreeEnd - degreeStart} ms")
+    println(s"samples of large degree RDD:")
+    largeDegrees.take(num = 5).foreach { case (vid, degree) =>
+      println(s"vid = $vid, degree = $degree") }
     val maxDegreeStart = System.currentTimeMillis()
-    val maxDegree = degrees.map(_._2).max()
+    val maxDegree = largeDegrees.map(_._2).max()
     val maxDegreeEnd = System.currentTimeMillis()
-    println(s"max degree = $maxDegree, cost ${maxDegreeEnd - maxDegreeStart} ms")
-    val bcDegreeStart = System.currentTimeMillis()
-    val bcDegrees = sc.broadcast(degrees.collectAsMap())
-    val bcDegreeEnd = System.currentTimeMillis()
-    println(s"broadcast degrees cost ${bcDegreeEnd - bcDegreeStart} ms")
+    println(s"max large degree = $maxDegree, cost ${maxDegreeEnd - maxDegreeStart} ms")
 
-    println(">>> filter neighbors with degree")
-    val filterStart = System.currentTimeMillis()
-    val filterNeighbors = neighbors.map { case (v, neighbors) =>
-      (v, FastUndirectedV2.filterNeighborTable(v, neighbors, bcDegrees.value))
-    }.persist($(storageLevel))
-    filterNeighbors.foreachPartition(_ => Unit)
-    println(s"count of filter neighbors = ${filterNeighbors.count()}, number of partitions = ${filterNeighbors.getNumPartitions}")
-    val filterEnd = System.currentTimeMillis()
-    println(s"filter neighbors cost ${filterEnd - filterStart} ms")
-    val filterNeighborsSize = filterNeighbors.mapPartitions(iter => Iterator(iter.size), preservesPartitioning = true).collect()
-    println(s"partition size of filtered neighbor tables: max=${filterNeighborsSize.max}, min=${filterNeighborsSize.min}")
-    val filterMaxDegree = filterNeighbors.map(_._2.length).max()
-    println(s"max degree of filtered neighbors = $filterMaxDegree," +
-      s"cost ${System.currentTimeMillis() - filterEnd} ms")
+    println(">>> generate vertex reindex")
+    val reindexStart = System.currentTimeMillis()
+    var curReindex = maxVertex
+    val reindex = largeDegrees.collect().sortBy(_._2).map { case (vid, _) =>
+      curReindex = curReindex + 1
+      (vid, curReindex)
+    }.toMap
+    val bcReindex = sc.broadcast(reindex)
+    val reindexEnd = System.currentTimeMillis()
+    println(s"generate reindex cost ${reindexEnd - reindexStart} ms")
+    println(s"reindex = ${reindex.toString()}")
 
-    println(">>> load edges from filtered neighbor tables")
+    println(">>> reindex neighbor tables")
+    val reindexNbStart = System.currentTimeMillis()
+    val reindexNeighbors = neighbors.map { case (srcId, nbs) =>
+      FastUndirectedV4.reindexNeighbors(srcId, nbs, bcReindex.value)
+    }
+    reindexNeighbors.foreachPartition(_ => Unit)
+    val reindexNbEnd = System.currentTimeMillis()
+    println(s"reindex neighbor tables cost ${reindexNbEnd - reindexNbStart} ms")
+    reindexNeighbors.take(num = 5).foreach { case (src, neighbors) =>
+      println(s"src = $src, neighbors = ${neighbors.mkString(",")}") }
+
+    println(">>> load edges from joined neighbor tables")
     val edgeStart = System.currentTimeMillis()
     val partNum = $(partitionNum)
-    val edge = filterNeighbors.flatMap { case (v, nb) =>
+    val edge = reindexNeighbors.flatMap { case (v, nb) =>
       nb.flatMap { nid =>
           val pid = EdgePartition2D.getPartition(v, nid, partNum)
           Iterator.single((pid, (v, nid)))
@@ -96,35 +116,32 @@ class FastUndirectedV2(override val uid: String) extends Transformer
         Edge(src, dst, null.asInstanceOf[Byte])
       }.persist($(storageLevel))
     edge.foreachPartition(_ => Unit)
-//    val edge = dataset.select($(srcNodeIdCol), $(dstNodeIdCol)).rdd.map { row =>
-//      val pid = EdgePartition2D.getPartition(row.getLong(0), row.getLong(1), partNum)
-//      (pid, (row.getLong(0), row.getLong(1)))
-//    }.partitionBy(new HashPartitioner(partNum))
-//      .map { case (_, (src, dst)) =>
-//        Edge(src, dst, null.asInstanceOf[Byte])
-//      }.persist($(storageLevel))
     println(s"count of edge = ${edge.count()}, number of partitions = ${edge.getNumPartitions}")
     val edgeEnd = System.currentTimeMillis()
     println(s"generate edges cost ${edgeEnd - edgeStart} ms")
+    println(s"samples of edge RDD:")
+    edge.take(num = 2).foreach { edge =>
+      println(s"src = ${edge.srcId}, dst = ${edge.dstId}, edge type = ${edge.attr}") }
     val edgeSize = edge.mapPartitions(iter => Iterator(iter.size), preservesPartitioning = true).collect()
     println(s"partition size of edge: max=${edgeSize.max}, min=${edgeSize.min}," +
       s"cost ${System.currentTimeMillis() - edgeEnd} ms")
 
     println(">>> checkpoint filtered neighbor tables and edges")
     val cpStart = System.currentTimeMillis()
-    filterNeighbors.foreachPartition(_ => Unit)
-    filterNeighbors.checkpoint()
+    reindexNeighbors.foreachPartition(_ => Unit)
+    reindexNeighbors.checkpoint()
     edge.foreachPartition(_ => Unit)
     edge.checkpoint()
     val cpEnd = System.currentTimeMillis()
     println(s"checkpoint cost ${cpEnd - cpStart} ms")
     neighbors.unpersist()
-    degrees.unpersist()
+    largeDegrees.unpersist()
+    //reindex.destroy()
 
     println(">>> count triangles")
     val countStart = System.currentTimeMillis()
-    val graph = Graph(filterNeighbors, edge)
-    val totalClosedTriangle = FastUndirectedV2.computeNumOfClosedTriangle(graph, $(storageLevel))
+    val graph = Graph(reindexNeighbors, edge)
+    val totalClosedTriangle = FastUndirectedV4.computeNumOfClosedTriangle(graph, $(storageLevel))
     println(s"numTriangle=$totalClosedTriangle")
     val countEnd = System.currentTimeMillis()
     println(s"count triangles cost ${countEnd - countStart} ms")
@@ -149,7 +166,8 @@ class FastUndirectedV2(override val uid: String) extends Transformer
   }
 }
 
-object FastUndirectedV2 {
+
+object FastUndirectedV4 {
 
   def filterNeighborTable(vid: VertexId,
                           neighbors: Array[VertexId],
@@ -164,6 +182,37 @@ object FastUndirectedV2 {
         ret.append(nid)
     }
     ret.toArray
+  }
+
+  def reindexNeighbors(srcId: VertexId,
+                       neighbors: Array[VertexId],
+                       reindex: Map[VertexId, VertexId]): (VertexId, Array[VertexId]) = {
+    val retNbs = new ArrayBuffer[VertexId]()
+    if (reindex.contains(srcId)) {
+      val reSrcId = reindex(srcId)
+      neighbors.foreach { dstId =>
+        if (reindex.contains(dstId)) {
+          val reDstId = reindex(dstId)
+          if (reDstId > reSrcId) {
+            retNbs.append(reDstId)
+          }
+        } else if (dstId > reSrcId) {
+          retNbs.append(dstId)
+        }
+      }
+      (reSrcId, retNbs.toArray.sorted)
+    } else {
+      neighbors.foreach { dstId =>
+        if (reindex.contains(dstId)) {
+          val reDstId = reindex(dstId)
+          if (reDstId > srcId)
+            retNbs.append(reDstId)
+        } else if (dstId > srcId) {
+          retNbs.append(dstId)
+        }
+      }
+      (srcId, retNbs.toArray.sorted)
+    }
   }
 
   def computeNumOfClosedTriangle(graphWithAdj: Graph[Array[VertexId], Byte],
@@ -203,5 +252,3 @@ object FastUndirectedV2 {
     degrees.map(d => d * (d - 1) / 2).sum()
   }
 }
-
-

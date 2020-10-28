@@ -1,7 +1,7 @@
 package ch.ethz.ml.graph.runner
 
 import ch.ethz.ml.graph.data.{Delimiter, GraphIO}
-import ch.ethz.ml.graph.trianglecount.{EdgeIterPlusUndirected, EdgeIterUndirected, FastUndirected, FastUndirectedV2, NodeIterPlusUndirected, NodeIterUndirected}
+import ch.ethz.ml.graph.trianglecount.{EdgeIterPlusUndirected, EdgeIterUndirected, FastUndirected, FastUndirectedV2, FastUndirectedV3, FastUndirectedV4, NodeIterPlusUndirected, NodeIterUndirected}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.storage.StorageLevel
 
@@ -9,7 +9,7 @@ object LocalUndirectedRunner {
 
   def main(args: Array[String]): Unit = {
 
-    val algo = "node_iter_plus"
+    val algo = "fast_v4"
     val mode = "local"
     //val input = "data/gemsec-Facebook/artist_edges.csv"
     val input = "data/test/undirected.txt"
@@ -36,6 +36,8 @@ object LocalUndirectedRunner {
     val counter = algo match {
       case "fast" => new FastUndirected()
       case "fast_v2" => new FastUndirectedV2()
+      case "fast_v3" => new FastUndirectedV3()
+      case "fast_v4" => new FastUndirectedV4()
       case "node_iter" => new NodeIterUndirected()
       case "node_iter_plus" => new NodeIterPlusUndirected()
       case "edge_iter" => new EdgeIterUndirected()
