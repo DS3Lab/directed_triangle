@@ -1,4 +1,4 @@
-# Triangle counting for large-scale directed graphs
+# Triangle counting algorithm for large-scale directed graphs
 
 ## algorithm configurations
 

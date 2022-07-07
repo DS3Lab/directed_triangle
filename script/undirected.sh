@@ -1,4 +1,4 @@
-hdfs_host='graph-10-master'
+hdfs_host='graph-master'
 
 /home/jiangjia/devs/spark-2.4.4-bin-hadoop2.7/bin/spark-submit \
   --class ch.ethz.ml.graph.runner.UndirectedRunner \

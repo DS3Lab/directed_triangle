@@ -92,8 +92,8 @@ class EdgeIterDirected(override val uid: String) extends Transformer
     val countStart = System.currentTimeMillis()
     val graph = Graph(neighbors, edge)
     val triangleCounts = EdgeIterDirected.computeNumOfClosedTriangle(graph, $(storageLevel)).map(_/3.0)
-    println(s"numTriangle=${triangleCounts.mkString(",")}")
     val countEnd = System.currentTimeMillis()
+    println(s"numTriangle=${triangleCounts.mkString(",")}")
     println(s"count triangles cost ${countEnd - countStart} ms")
 
     val output = dataset
